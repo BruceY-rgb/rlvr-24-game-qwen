@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twentyfour-rl"
+version = "0.1.0"
+description = "GRPO/RLVR experiment scaffold for the 24 game on ModelArts Ascend."
+requires-python = ">=3.10"
+dependencies = [
+  "accelerate>=0.33.0",
+  "datasets>=2.20.0",
+  "pandas>=2.0.0",
+  "peft>=0.12.0",
+  "plotly>=5.22.0",
+  "pyyaml>=6.0.0",
+  "safetensors>=0.4.3",
+  "sentencepiece>=0.2.0",
+  "streamlit>=1.36.0",
+  "transformers>=4.44.0",
+  "trl>=0.11.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

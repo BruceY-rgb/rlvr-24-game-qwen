@@ -1,0 +1,14 @@
+# Use a ModelArts Ascend PyTorch image where torch, torch-npu, and CANN are
+# already matched. Installing torch-npu with pip often breaks that match.
+accelerate>=0.33.0
+datasets>=2.20.0
+pandas>=2.0.0
+peft>=0.12.0
+plotly>=5.22.0
+pyyaml>=6.0.0
+safetensors>=0.4.3
+sentencepiece>=0.2.0
+streamlit>=1.36.0
+transformers>=4.44.0
+trl>=0.11.0
+

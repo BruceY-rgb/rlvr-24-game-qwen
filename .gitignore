@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Runtime checkpoints can become large; keep scripts and small eval artifacts in git.
+outputs/qwen24-grpo/
+outputs/sanity/
+outputs/eval/
+
+# Hugging Face / model caches
+.cache/
+models/
+checkpoints/
