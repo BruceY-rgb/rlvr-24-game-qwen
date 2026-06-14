@@ -3,6 +3,15 @@
 This repo implements the course project scaffold for training a small open LLM
 to solve the 24 game with verifiable rewards.
 
+## 大文件 / 完整产物（浙大云盘）
+
+模型权重、完整评估数据、实验报告等大文件**不纳入 git 仓库**，已上传浙大云盘：
+
+- 链接：<https://pan.zju.edu.cn/apps/files/desktop/files/folder/455006606692?isopen=1>
+- 上传日期：2026-06-14
+- 内容：`checkpoint-400` 的 LoRA adapter 与 optimizer、全量评估结果（base / trained / solver 的 metrics 与明细）、实验报告（`docs/实验报告.md`）与 ModelArts 部署手册。
+- 仓库内只保留代码、脚本、文档与小评估指标；大文件请从上方云盘获取。
+
 ## What is included
 
 - Safe expression verifier: checks format, allowed operators, card usage,
