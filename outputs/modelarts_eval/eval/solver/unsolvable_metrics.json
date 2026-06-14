@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "exact-search",
+    "split": "unsolvable",
+    "samples": 100,
+    "attempts": 100,
+    "pass_at_1": 0.0,
+    "pass_at_k": 0.0,
+    "legal_rate": 0.0,
+    "format_rate": 1.0,
+    "invalid_rate": 1.0,
+    "hallucination_rate": 0.0
+  }
+]

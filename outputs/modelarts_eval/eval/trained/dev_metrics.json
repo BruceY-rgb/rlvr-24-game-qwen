@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "grpo",
+    "split": "dev",
+    "samples": 136,
+    "attempts": 544,
+    "pass_at_1": 0.022058823529411766,
+    "pass_at_k": 0.0661764705882353,
+    "legal_rate": 0.5808823529411765,
+    "format_rate": 0.5514705882352942,
+    "invalid_rate": 0.4191176470588235,
+    "hallucination_rate": 0.0
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "base",
+    "split": "countdown_unique",
+    "samples": 2000,
+    "attempts": 2000,
+    "pass_at_1": 0.0,
+    "pass_at_k": 0.0,
+    "legal_rate": 0.029,
+    "format_rate": 0.208,
+    "invalid_rate": 0.971,
+    "hallucination_rate": 0.0
+  }
+]

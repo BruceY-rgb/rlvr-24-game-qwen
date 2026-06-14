@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "base",
+    "split": "dev",
+    "samples": 136,
+    "attempts": 544,
+    "pass_at_1": 0.0,
+    "pass_at_k": 0.007352941176470588,
+    "legal_rate": 0.051470588235294115,
+    "format_rate": 0.11029411764705882,
+    "invalid_rate": 0.9485294117647058,
+    "hallucination_rate": 0.0
+  }
+]

@@ -10,7 +10,7 @@ from typing import Any
 from .data import read_jsonl
 from .eval import choose_device
 from .prompts import render_prompt
-from .rewards import grpo_reward_func, score_output
+from .rewards import make_grpo_reward_func, reward_weights, score_output
 
 
 def _import_torch():
@@ -36,6 +36,14 @@ def dtype_from_arg(torch, dtype: str):
         "fp16": torch.float16,
         "fp32": torch.float32,
     }.get(dtype, torch.bfloat16)
+
+
+def _weights_from_args(args) -> dict[str, float]:
+    disabled = [s for s in (getattr(args, "disable_rewards", "") or "").split(",") if s.strip()]
+    weights = reward_weights(disabled)
+    if disabled:
+        print(f"[ablation] disabled reward components: {disabled} -> weights {weights}", flush=True)
+    return weights
 
 
 def build_lora_config(args):
@@ -70,6 +78,7 @@ def run_trl_grpo(args) -> None:
     dev_rows = read_jsonl(args.dev_file) if args.dev_file else []
     tokenizer = load_tokenizer(args.model_name_or_path)
     lora_config = build_lora_config(args)
+    weights = _weights_from_args(args)
 
     config_values = {
         "output_dir": args.output_dir,
@@ -102,7 +111,7 @@ def run_trl_grpo(args) -> None:
     trainer_values = {
         "model": args.model_name_or_path,
         "args": training_args,
-        "reward_funcs": [grpo_reward_func],
+        "reward_funcs": [make_grpo_reward_func(weights)],
         "train_dataset": Dataset.from_list(train_rows),
         "eval_dataset": Dataset.from_list(dev_rows) if dev_rows else None,
         "peft_config": lora_config,
@@ -187,13 +196,14 @@ def evaluate_dev_subset(model, tokenizer, device, rows: list[dict[str, Any]], ar
     if not rows:
         return {}
     model.eval()
+    weights = _weights_from_args(args)
     sample_rows = rows[: args.dev_eval_samples]
     exact = legal = fmt = invalid = total_reward = 0.0
     for row in sample_rows:
         numbers = [int(n) for n in row["numbers"]]
         target = int(row.get("target", 24))
         completion = generate_group(model, tokenizer, device, numbers, target, args)[0]
-        scored = score_output(numbers, completion, target)
+        scored = score_output(numbers, completion, target, weights=weights)
         exact += scored["exact"]
         legal += scored["legal"]
         fmt += scored["format"]
@@ -215,6 +225,7 @@ def run_manual_grouped_rl(args) -> None:
     torch = _import_torch()
     torch.manual_seed(args.seed)
     random.seed(args.seed)
+    weights = _weights_from_args(args)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / "train_metrics.jsonl"
@@ -235,7 +246,7 @@ def run_manual_grouped_rl(args) -> None:
             target = int(row.get("target", 24))
             prompt = render_prompt(tokenizer, numbers, target)
             completions = generate_group(model, tokenizer, device, numbers, target, args)
-            scored = [score_output(numbers, completion, target) for completion in completions]
+            scored = [score_output(numbers, completion, target, weights=weights) for completion in completions]
             rewards = torch.tensor([s["reward"] for s in scored], dtype=torch.float32, device=device)
             std = rewards.std(unbiased=False)
             advantages = rewards - rewards.mean()
@@ -315,6 +326,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lora-target-modules",
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    )
+    parser.add_argument(
+        "--disable-rewards",
+        default="",
+        help="Comma-separated reward components to zero out for ablation (legal,format,closeness).",
     )
     return parser
 

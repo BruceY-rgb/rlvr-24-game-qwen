@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "base",
+    "split": "ood_test",
+    "samples": 136,
+    "attempts": 544,
+    "pass_at_1": 0.014705882352941176,
+    "pass_at_k": 0.03676470588235294,
+    "legal_rate": 0.058823529411764705,
+    "format_rate": 0.051470588235294115,
+    "invalid_rate": 0.9411764705882353,
+    "hallucination_rate": 0.0
+  }
+]

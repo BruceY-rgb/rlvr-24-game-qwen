@@ -16,3 +16,14 @@ outputs/eval/
 .cache/
 models/
 checkpoints/
+
+# Large model weights & training state — too big for git (keep on OBS/ModelArts)
+checkpoint-*/
+*.safetensors
+*.pt
+*.bin
+
+# Large raw per-sample eval dumps — keep *_metrics.json + summary.*, drop the big ones
+outputs/**/countdown_*.jsonl
+outputs/**/countdown_*.csv
+outputs/modelarts_ablation/

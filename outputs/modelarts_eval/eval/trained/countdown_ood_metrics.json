@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "grpo",
+    "split": "countdown_ood",
+    "samples": 2000,
+    "attempts": 2000,
+    "pass_at_1": 0.0125,
+    "pass_at_k": 0.0125,
+    "legal_rate": 0.5465,
+    "format_rate": 0.9185,
+    "invalid_rate": 0.4535,
+    "hallucination_rate": 0.0
+  }
+]

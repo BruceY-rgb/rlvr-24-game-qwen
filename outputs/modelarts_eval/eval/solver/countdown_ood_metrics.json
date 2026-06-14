@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "exact-search",
+    "split": "countdown_ood",
+    "samples": 2000,
+    "attempts": 2000,
+    "pass_at_1": 1.0,
+    "pass_at_k": 1.0,
+    "legal_rate": 1.0,
+    "format_rate": 1.0,
+    "invalid_rate": 0.0,
+    "hallucination_rate": 0.0
+  }
+]

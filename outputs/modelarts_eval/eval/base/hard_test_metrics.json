@@ -1,0 +1,14 @@
+[
+  {
+    "model_name": "base",
+    "split": "hard_test",
+    "samples": 100,
+    "attempts": 400,
+    "pass_at_1": 0.0,
+    "pass_at_k": 0.0,
+    "legal_rate": 0.05,
+    "format_rate": 0.05,
+    "invalid_rate": 0.95,
+    "hallucination_rate": 0.0
+  }
+]
