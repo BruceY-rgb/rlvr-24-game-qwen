@@ -8,9 +8,8 @@ __pycache__/
 .DS_Store
 
 # Runtime checkpoints can become large; keep scripts and small eval artifacts in git.
-outputs/qwen24-grpo/
-outputs/sanity/
-outputs/eval/
+outputs/*
+
 
 # Hugging Face / model caches
 .cache/

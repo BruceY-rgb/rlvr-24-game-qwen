@@ -53,8 +53,12 @@ def build_lora_config(args):
 
 def load_tokenizer(model_name: str):
     from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    # 新增 local_files_only=True 强制本地离线加载
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        local_files_only=True
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
@@ -93,6 +97,7 @@ def run_trl_grpo(args) -> None:
         "model_init_kwargs": {
             "trust_remote_code": True,
             "torch_dtype": dtype_from_arg(torch, args.dtype),
+            "local_files_only": True,
         },
     }
     grpo_sig = inspect.signature(GRPOConfig.__init__).parameters
@@ -119,16 +124,23 @@ def run_trl_grpo(args) -> None:
 
 def load_manual_model(args):
     torch = _import_torch()
-    from peft import get_peft_model
+    from peft import get_peft_model, PeftModel
     from transformers import AutoModelForCausalLM
 
     tokenizer = load_tokenizer(args.model_name_or_path)
+    # 加载基座，增加本地离线参数
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         trust_remote_code=True,
         torch_dtype=dtype_from_arg(torch, args.dtype),
         low_cpu_mem_usage=True,
+        local_files_only=True,
     )
+    # 如果传入SFT LoRA路径，先加载SFT权重
+    if args.sft_lora_path and Path(args.sft_lora_path).exists():
+        print(f"✅ 加载SFT预训练LoRA: {args.sft_lora_path}")
+        model = PeftModel.from_pretrained(model, args.sft_lora_path)
+    # 再绑定本次GRPO训练LoRA配置
     model = get_peft_model(model, build_lora_config(args))
     model.config.use_cache = False
     if args.gradient_checkpointing:
@@ -136,7 +148,22 @@ def load_manual_model(args):
     device = choose_device()
     model.to(device)
     model.train()
-    return model, tokenizer, device
+
+    # Reference model：只用纯基座，不带任何LoRA，KL对比原始基线
+    ref_model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        trust_remote_code=True,
+        torch_dtype=dtype_from_arg(torch, args.dtype),
+        low_cpu_mem_usage=True,
+        local_files_only=True,
+    )
+    ref_model.config.use_cache = False
+    ref_model.to(device)
+    ref_model.eval()
+    for param in ref_model.parameters():
+        param.requires_grad_(False)
+
+    return model, ref_model, tokenizer, device
 
 
 def generate_group(model, tokenizer, device, numbers: list[int], target: int, args) -> list[str]:
@@ -211,6 +238,78 @@ def evaluate_dev_subset(model, tokenizer, device, rows: list[dict[str, Any]], ar
     }
 
 
+def completion_logprob_per_token(model, tokenizer, device, prompt: str, completion: str):
+    """Return per-token logprobs and a mask for the completion tokens."""
+    torch = _import_torch()
+    encoded_prompt = tokenizer(prompt, return_tensors="pt")
+    prompt_len = encoded_prompt["input_ids"].shape[1]
+    encoded = tokenizer(prompt + completion, return_tensors="pt")
+    input_ids = encoded["input_ids"].to(device)
+    attention_mask = encoded["attention_mask"].to(device)
+    labels = input_ids.clone()
+    labels[:, :prompt_len] = -100
+
+    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+    logits = outputs.logits[:, :-1, :].float()
+    shifted_labels = labels[:, 1:]
+    mask = shifted_labels.ne(-100)
+    safe_labels = shifted_labels.masked_fill(~mask, 0)
+    log_probs = torch.log_softmax(logits, dim=-1)
+    token_log_probs = log_probs.gather(-1, safe_labels.unsqueeze(-1)).squeeze(-1) * mask
+    return token_log_probs, mask
+
+
+def compute_kl_penalty(
+    policy_model, ref_model, tokenizer, device, prompt: str, completion: str
+):
+    """Compute approximate KL divergence between policy and reference model."""
+    torch = _import_torch()
+    with torch.no_grad():
+        ref_log_probs, mask = completion_logprob_per_token(ref_model, tokenizer, device, prompt, completion)
+    policy_log_probs, _ = completion_logprob_per_token(policy_model, tokenizer, device, prompt, completion)
+    # Only compute KL on tokens where we have both ref and policy logprobs
+    if mask.sum() == 0:
+        return torch.tensor(0.0, device=device)
+    diff = ref_log_probs - policy_log_probs
+    kl = torch.exp(diff) - diff - 1.0
+    # Weight by the mask and normalize by number of completion tokens
+    return (kl * mask).sum() / mask.sum()
+
+
+def get_stage_weights(epoch, total_epochs):
+    """根据训练阶段调整权重"""
+    if epoch < total_epochs * 0.3:
+        # 阶段1：学习格式和合法性
+        return {
+            "exact": 0.5,
+            "legal": 0.3,
+            "format": 0.2,
+            "closeness": 0.1,
+            "refusal": 0.0,
+            "penalty": 0.0,
+        }
+    elif epoch < total_epochs * 0.7:
+        # 阶段2：学习精确解题
+        return {
+            "exact": 2.0,
+            "legal": 0.2,
+            "format": 0.1,
+            "closeness": 0.1,
+            "refusal": 0.5,
+            "penalty": -0.3,
+        }
+    else:
+        # 阶段3：学习拒答和抑制幻觉
+        return {
+            "exact": 3.0,
+            "legal": 0.1,
+            "format": 0.05,
+            "closeness": 0.1,
+            "refusal": 1.0,
+            "penalty": -0.5,
+        }
+
+
 def run_manual_grouped_rl(args) -> None:
     torch = _import_torch()
     torch.manual_seed(args.seed)
@@ -221,7 +320,7 @@ def run_manual_grouped_rl(args) -> None:
 
     train_rows = read_jsonl(args.train_file)
     dev_rows = read_jsonl(args.dev_file) if args.dev_file else []
-    model, tokenizer, device = load_manual_model(args)
+    model, ref_model, tokenizer, device = load_manual_model(args)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     global_step = 0
@@ -234,19 +333,29 @@ def run_manual_grouped_rl(args) -> None:
             numbers = [int(n) for n in row["numbers"]]
             target = int(row.get("target", 24))
             prompt = render_prompt(tokenizer, numbers, target)
+
+            # 根据训练阶段调整权重
+            stage_weights = get_stage_weights(epoch, args.num_train_epochs)
+
             completions = generate_group(model, tokenizer, device, numbers, target, args)
-            scored = [score_output(numbers, completion, target) for completion in completions]
+            scored = [score_output(numbers, completion, target, weights=stage_weights) for completion in completions]
             rewards = torch.tensor([s["reward"] for s in scored], dtype=torch.float32, device=device)
             std = rewards.std(unbiased=False)
             advantages = rewards - rewards.mean()
             if float(std.detach().cpu()) > 1e-6:
                 advantages = advantages / (std + 1e-6)
 
-            losses = []
+            policy_losses = []
+            kl_penalties = []
             for completion, advantage in zip(completions, advantages):
                 logprob = completion_logprob(model, tokenizer, device, prompt, completion)
-                losses.append(-advantage.detach() * logprob)
-            loss = torch.stack(losses).mean() / args.gradient_accumulation_steps
+                policy_losses.append(-advantage.detach() * logprob)
+                if args.kl_coef > 0.0 and ref_model is not None:
+                    kl_penalties.append(compute_kl_penalty(model, ref_model, tokenizer, device, prompt, completion))
+
+            policy_loss = torch.stack(policy_losses).mean()
+            kl_loss = torch.stack(kl_penalties).mean() if kl_penalties else torch.tensor(0.0, device=device)
+            loss = (policy_loss + args.kl_coef * kl_loss) / args.gradient_accumulation_steps
             loss.backward()
 
             if (row_idx + 1) % args.gradient_accumulation_steps == 0:
@@ -265,6 +374,7 @@ def run_manual_grouped_rl(args) -> None:
                     "train_format_rate": sum(s["format"] for s in scored) / len(scored),
                     "train_invalid_rate": sum(0.0 if s["is_valid"] else 1.0 for s in scored) / len(scored),
                     "completion_length": sum(len(c) for c in completions) / len(completions),
+                    "kl_penalty": float(kl_loss.detach().cpu()) if kl_penalties else 0.0,
                 }
                 if global_step % args.eval_steps == 0:
                     metrics.update(evaluate_dev_subset(model, tokenizer, device, dev_rows, args, global_step))
@@ -287,19 +397,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train Qwen on 24 game with TRL GRPO or a manual grouped RL fallback.")
     parser.add_argument("--trainer", choices=["trl", "manual"], default="trl")
     parser.add_argument("--model-name-or-path", default="Qwen/Qwen2.5-1.5B-Instruct")
+    # 新增SFT LoRA参数
+    parser.add_argument("--sft-lora-path", type=str, default="", help="预训练SFT LoRA权重目录，GRPO基于SFT续训")
     parser.add_argument("--train-file", default="data/processed/train.jsonl")
     parser.add_argument("--dev-file", default="data/processed/dev.jsonl")
     parser.add_argument("--output-dir", default="outputs/qwen24-grpo")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
-    parser.add_argument("--num-train-epochs", type=float, default=1.0)
+    parser.add_argument("--num-train-epochs", type=float, default=3.0)
     parser.add_argument("--max-steps", type=int, default=-1)
-    parser.add_argument("--learning-rate", type=float, default=5e-6)
+    parser.add_argument("--learning-rate", type=float, default=3e-6)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--per-device-train-batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
-    parser.add_argument("--num-generations", type=int, default=4)
+    parser.add_argument("--num-generations", type=int, default=8)
     parser.add_argument("--max-prompt-length", type=int, default=512)
     parser.add_argument("--max-completion-length", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.8)
@@ -309,6 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-steps", type=int, default=50)
     parser.add_argument("--dev-eval-samples", type=int, default=64)
     parser.add_argument("--gradient-checkpointing", action="store_true")
+    parser.add_argument("--kl-coef", type=float, default=0.04, help="KL divergence penalty coefficient (0 to disable)")
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -329,4 +442,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
