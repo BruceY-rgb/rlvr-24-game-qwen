@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Iterable
 
 from .verifier import extract_answer, has_r1_format, verify
 
@@ -14,6 +14,27 @@ DEFAULT_REWARD_WEIGHTS = {
     "refusal": 1.0,
     "penalty": -0.5,
 }
+
+
+ABLATABLE_REWARDS = ("legal", "format", "closeness", "refusal", "penalty")
+
+
+def reward_weights(disabled: Iterable[str] | None = None) -> dict[str, float]:
+    """Copy default weights, zeroing the named components for ablation.
+
+    exact is the core verifiable signal and is never ablatable.
+    """
+    weights = dict(DEFAULT_REWARD_WEIGHTS)
+    for name in disabled or []:
+        name = name.strip()
+        if not name:
+            continue
+        if name == "exact":
+            raise ValueError("Refusing to ablate the 'exact' reward component.")
+        if name not in weights:
+            raise ValueError(f"Unknown reward component '{name}'. Choices: {ABLATABLE_REWARDS}.")
+        weights[name] = 0.0
+    return weights
 
 
 def _target_from_value(value: Any, default: float = 24.0) -> float:
@@ -133,17 +154,27 @@ def normalize_completion_text(completion: Any) -> str:
     return str(completion)
 
 
-def grpo_reward_func(completions, numbers=None, target=None, **kwargs):
-    numbers = numbers or kwargs.get("nums") or kwargs.get("cards")
-    if numbers is None:
-        raise ValueError("GRPO reward requires a 'numbers' column.")
-    if target is None:
-        target = kwargs.get("targets") or [24.0] * len(completions)
-    rewards: list[float] = []
-    for completion, nums, tgt in zip(completions, numbers, target):
-        text = normalize_completion_text(completion)
-        rewards.append(score_output(list(nums), text, _target_from_value(tgt))["reward"])
-    return rewards
+def make_grpo_reward_func(weights: dict[str, float] | None = None):
+    """Build a TRL reward function bound to a weight dict (for ablation)."""
+    weights = weights or DEFAULT_REWARD_WEIGHTS
+
+    def grpo_reward_func(completions, numbers=None, target=None, **kwargs):
+        numbers = numbers or kwargs.get("nums") or kwargs.get("cards")
+        if numbers is None:
+            raise ValueError("GRPO reward requires a 'numbers' column.")
+        if target is None:
+            target = kwargs.get("targets") or [24.0] * len(completions)
+        rewards: list[float] = []
+        for completion, nums, tgt in zip(completions, numbers, target):
+            text = normalize_completion_text(completion)
+            rewards.append(score_output(list(nums), text, _target_from_value(tgt), weights=weights)["reward"])
+        return rewards
+
+    grpo_reward_func.__name__ = "grpo_reward_func"
+    return grpo_reward_func
+
+
+grpo_reward_func = make_grpo_reward_func()
 
 
 def compute_detailed_metrics(results):

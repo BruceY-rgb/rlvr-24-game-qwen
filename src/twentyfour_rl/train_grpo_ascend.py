@@ -10,7 +10,7 @@ from typing import Any
 from .data import read_jsonl
 from .eval import choose_device
 from .prompts import render_prompt
-from .rewards import grpo_reward_func, score_output
+from .rewards import make_grpo_reward_func, reward_weights, score_output
 
 
 def _import_torch():
@@ -74,6 +74,10 @@ def run_trl_grpo(args) -> None:
     dev_rows = read_jsonl(args.dev_file) if args.dev_file else []
     tokenizer = load_tokenizer(args.model_name_or_path)
     lora_config = build_lora_config(args)
+    disabled = [s for s in (getattr(args, "disable_rewards", "") or "").split(",") if s.strip()]
+    weights = reward_weights(disabled)
+    if disabled:
+        print(f"[ablation] disabled reward components: {disabled} -> {weights}", flush=True)
 
     config_values = {
         "output_dir": args.output_dir,
@@ -107,7 +111,7 @@ def run_trl_grpo(args) -> None:
     trainer_values = {
         "model": args.model_name_or_path,
         "args": training_args,
-        "reward_funcs": [grpo_reward_func],
+        "reward_funcs": [make_grpo_reward_func(weights)],
         "train_dataset": Dataset.from_list(train_rows),
         "eval_dataset": Dataset.from_list(dev_rows) if dev_rows else None,
         "peft_config": lora_config,
@@ -428,6 +432,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lora-target-modules",
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+    )
+    parser.add_argument(
+        "--disable-rewards",
+        default="",
+        help="Comma-separated reward components to zero out for ablation (legal,format,closeness,refusal,penalty).",
     )
     return parser
 
