@@ -3,6 +3,22 @@
 This repo implements the course project scaffold for training a small open LLM
 to solve the 24 game with verifiable rewards.
 
+## 大文件 / 完整产物（浙大云盘）
+
+模型权重、消融 adapter、完整评估原始结果等大文件不纳入 git 仓库，存放在浙大云盘。
+
+第二轮（checkpoint-1400 与缩减消融）
+- 链接：<https://pan.zju.edu.cn/apps/files/desktop/files/folder/455006616665?isopen=1>
+- 上传日期：2026-06-19
+- 内容：4 个消融模型 adapter（full、no_legal、no_refusal、no_penalty，各 200 步）。评估结果与分析见 docs/round2_report.md。
+
+第一轮（checkpoint-400）
+- 链接：<https://pan.zju.edu.cn/apps/files/desktop/files/folder/455006606692?isopen=1>
+- 上传日期：2026-06-14
+- 内容：第一轮 LoRA adapter 与 optimizer、评估结果、第一轮报告。
+
+仓库内只保留代码、脚本、文档与小评估指标。
+
 ## What is included
 
 - Safe expression verifier: checks format, allowed operators, card usage,
